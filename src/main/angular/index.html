@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html ng-app="mirror">
+<head>
+    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.3.0-beta.14/angular.min.js"></script>
+    <script type="text/javascript" src="js/mirror.js"></script>
+    <title>Glassware</title>
+</head>
+<body>
+<div ng-controller="MirrorController">
+    <fieldset>
+        <label>Timeline</label>
+
+        <input ng-model="timelineMessage"/>
+        <button ng-click="insertTimeline()">Insert Timeline</button>
+    </fieldset>
+</div>
+
+</body>
+</html>
