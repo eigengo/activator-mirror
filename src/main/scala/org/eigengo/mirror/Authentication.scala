@@ -9,7 +9,7 @@ import scala.concurrent.{ExecutionContext, Future}
 object Authentication {
   private val headerName = "Subject"
 
-  def validCredentials(implicit ec: ExecutionContext): ContextAuthenticator[Credential] = { ctx => {
+  def validCredential(implicit ec: ExecutionContext): ContextAuthenticator[Credential] = { ctx => {
       val header = ctx.request.headers.find(_.name == headerName).map(h => doAuth(h.value))
       Future(header.getOrElse(Left(MissingHeaderRejection(headerName))))
     }

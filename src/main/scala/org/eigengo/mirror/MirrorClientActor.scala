@@ -16,6 +16,7 @@ class MirrorClientActor extends Actor {
       .build()
 
   def receive: Receive = {
-    case (c: Credential, t: TimelineItem) => mirror(c).timeline().insert(t).execute()
+    case (c: Credential, t: TimelineItem) =>
+      sender ! mirror(c).timeline().insert(t).execute().getId
   }
 }

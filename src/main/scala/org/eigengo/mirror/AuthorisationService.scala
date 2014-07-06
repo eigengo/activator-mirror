@@ -11,11 +11,9 @@ object AuthorisationService extends Directives {
       get {
         parameter('code) { code =>
           val flow = Authorisation.newAuthorizationCodeFlow()
-          val tokenResponse = flow.newTokenRequest(code).
-            setRedirectUri("http://localhost:8080/oauth2callback").execute()
+          val tokenResponse = flow.newTokenRequest(code).setRedirectUri("http://localhost:8080/oauth2callback").execute()
           val subject = tokenResponse.asInstanceOf[GoogleTokenResponse].parseIdToken.getPayload.getSubject
           flow.createAndStoreCredential(tokenResponse, subject)
-          val credential = Authorisation.newAuthorizationCodeFlow().loadCredential(subject)
 
           redirect(s"http://localhost:8080/index.html#/?subject=$subject", StatusCodes.TemporaryRedirect)
         } ~ {
