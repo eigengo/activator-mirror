@@ -16,10 +16,11 @@ object AuthorisationService extends Directives {
           flow.createAndStoreCredential(tokenResponse, subject)
 
           redirect(s"http://localhost:8080/index.html#/?subject=$subject", StatusCodes.TemporaryRedirect)
-        } ~ {
+        } ~ dynamic {
           val flow = Authorisation.newAuthorizationCodeFlow()
           val url = flow.newAuthorizationUrl().setRedirectUri("http://localhost:8080/oauth2callback")
           url.set("approval_prompt", "force")
+
           redirect(url.build(), StatusCodes.TemporaryRedirect)
         }
       }
