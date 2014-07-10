@@ -1,0 +1,283 @@
+<html>
+<head>
+    <title>Google Glass Mirror API</title>
+</head>
+<body>
+<div>
+<h2>Google Glass Mirror API</h2>
+<p>If you got your hands on the Google Glass, you are no doubt keen to try developing applications for it. The applications come in two major flavours: applications running on the Glass, and regular web applications using the Mirror API. In this post, I will show you how to use the Mirror API in a small Spray &amp; Akka application. To focus on the essence, I will use the Google Client libraries, even though the are include blocking calls.</p>
+</div>
+<div>
+<h2>The goal</h2>
+<p>To demonstrate the Mirror APIs, we will build an application that allows users to insert messages to the Glass’s timeline. The application will prompt you to log in to your Google account if it does not have a valid OAuth2 authentication; once you log in and the application receives the OAuth2 credential, you can then type your message, click Insert Timeline, and the message will appear on your Glass.</p>
+<p><img src="/oauth2.png" title="OAuth2 login"/></p>
+<p><img src="/accept.png" title="Accept required privileges"/></p>
+<p><img src="/insert.png" title="Send message to Glass"/></p>
+</div>
+<div>
+<h2>The main components</h2>
+<p>The application is made up of the Spray REST server, and an AngularJS browser application. The REST server exposes only two endpoints:</p>
+<ul>
+<li>GET <code>/oauth2callback</code>,</li>
+<li>POST <code>/timeline</code>.</li>
+</ul>
+<p>The <code>/oauth2callback</code> is the endpoint that deals with accepting the OAuth2 credential, and the <code>/timeline</code> endpoint inserts a message to the timeline on the Glass. The <code>/timeline</code> endpoint requires the Subject header to be present, and its value should be valid OAuth2 subject.</p>
+<p>The AngularJS application only makes the REST calls to the <code>/timeline</code> endpoint.</p>
+</div>
+<div>
+<h2>The REST server</h2>
+<p>The REST server follows the usual pattern of spray-can applications. It starts the HTTP server and binds an actor that handles the incoming HTTP requests. Naturally, instead of dealing with the raw HTTP requests, we use spray-routing to express the endpoint behaviour in a convenient DSL.</p>
+<code><pre>
+class Main(route: Route) extends HttpServiceActor {
+  def receive: Receive = runRoute(route)
+}
+ 
+object Main extends App with RouteConcatenation {
+  implicit val system = ActorSystem("Mirror")
+  import system.dispatcher
+  val service = system.actorOf(Props(new Main(...)))
+  val io = IO(Http)
+  io ! Http.Bind(service, interface = "0.0.0.0", port = 8080)
+ 
+  StdIn.readLine()
+  system.shutdown()
+}</pre></code>
+<p>In addition to implementing our two REST endpoints, we need to be able to serve the static content, namely the <code>index.html</code>, and <code>js/mirror.js</code>. So, we can split our endpoints into three services: the <code>StaticService</code>, <code>AuthorisationService</code> and the <code>TimelineService</code>.</p>
+</div>
+<div>
+<h2>StaticService</h2>
+<p>The <code>StaticService</code>, as one expects, is the easiest to implement. It handles the GET requests by serving the content of a resource (a file on the classpath).</p>
+<code><pre>
+object StaticService extends Directives {
+ 
+  def route(implicit arf: ActorRefFactory): Route = {
+    getFromResourceDirectory("")
+  }
+ 
+}
+</pre></code>
+</div>
+<div>
+<h2>AuthorisationService</h2>
+<p>The <code>/oauth2callback</code> endpoint that this service exposes deals with getting and remembering the OAuth2 authenticaton that we will need for the <code>/timeline</code> endpoint. On a GET request to <code>/oauth2callback</code>, we check if we have the <code>code</code> request parameter. If so, we have received the OAuth2 response, and we’re ready to create the credential. If not, we need to compute a redirect URL, which will take the user to the Google login page. In code, all this looks a lot less scary.</p>
+<code><pre>
+object AuthorisationService extends Directives {
+ 
+  def route: Route = {
+    path("oauth2callback") {
+      get {
+        parameter('code) { code =>
+          val flow = Authorisation.newAuthorizationCodeFlow()
+          val tokenResponse = flow.newTokenRequest(code).
+            setRedirectUri("http://localhost:8080/oauth2callback").execute()
+          val subject = tokenResponse.asInstanceOf[GoogleTokenResponse].
+            parseIdToken.getPayload.getSubject
+          flow.createAndStoreCredential(tokenResponse, subject)
+ 
+          redirect(s"http://localhost:8080/index.html#/?subject=$subject", 
+                   StatusCodes.TemporaryRedirect)
+        } ~ {
+          val flow = Authorisation.newAuthorizationCodeFlow()
+          val url = flow.newAuthorizationUrl().
+            setRedirectUri("http://localhost:8080/oauth2callback")
+          url.set("approval_prompt", "force")
+          redirect(url.build(), StatusCodes.TemporaryRedirect)
+        }
+      }
+    }
+  }
+ 
+}
+</pre></code>
+<p>The only thing that this listing is not showing is the <code>Authorisation</code> module, which handles the internals of the OAuth2 mechanism. To make our code easier, we are using the Google client APIs.</p>
+<code><pre>
+object ClientComponents {
+  val transport = new NetHttpTransport()
+  val jsonFactory = new JacksonFactory()
+}
+ 
+object Authorisation {
+  import org.eigengo.mirror.ClientComponents._
+ 
+  private final val GLASS_SCOPE: String =
+    "https://www.googleapis.com/auth/glass.timeline " +
+    "https://www.googleapis.com/auth/glass.location " +
+    "https://www.googleapis.com/auth/userinfo.profile"
+  private final val (clientId, clientSecret) = {
+    val config = ConfigFactory.parseFile(
+      new File(System.getProperty("user.home"), ".google/mirror"))
+    (config.getString("clientId"), config.getString("clientSecret"))
+  }
+  private final val dataStoreFactory = new MemoryDataStoreFactory()
+ 
+  def newAuthorizationCodeFlow(): AuthorizationCodeFlow = {
+    new GoogleAuthorizationCodeFlow.Builder(transport, jsonFactory, 
+        clientId, clientSecret, Collections.singleton(GLASS_SCOPE)).
+      setAccessType("offline").
+      setDataStoreFactory(dataStoreFactory).
+      build()
+  }
+}
+</pre></code>
+</div>
+<div>
+<h2>TimelineService</h2>
+<p>To complete the picture, the <code>TimelineService</code> exposes the <code>/timeline</code> endpoint, which receives the text of the message to be sent out as the request body and the OAuth2 subject as the header parameter. It delegates the actual sending of the timeline item to the <code>MirrorClientActor</code>.</p>
+<code><pre>
+object TimelineService extends Directives {
+  import Authentication._
+  import akka.pattern.ask
+  import Timeouts.internalTimeout
+ 
+  def route(mirrorActor: ActorRef)(implicit ctx: ExecutionContext): Route = {
+    path("timeline") {
+      authenticate(validCredential) { credential =>
+        post {
+          handleWith { body: String =>
+            val t = new TimelineItem()
+            t.setText(body)
+            t.setNotification(new NotificationConfig().setLevel("DEFAULT"))
+  
+            (mirrorActor ? ((credential, t))).mapTo[String]
+          }
+        }
+      }
+    }
+  }
+ 
+}
+</pre></code>
+<p>Apart from the <code>authenticate(validCredential)</code> call, this is again fairly standard Spray code! It turns out that the implementaton of <code>validCredential</code> is not too onerous, eihter:</p>
+<code><pre>
+object Authentication {
+  private val headerName = "Subject"
+ 
+  def validCredential(implicit ec: ExecutionContext): ContextAuthenticator[Credential] = { ctx => {
+      val header = ctx.request.headers.find(_.name == headerName).map(h => doAuth(h.value))
+      Future(header.getOrElse(Left(MissingHeaderRejection(headerName))))
+    }
+  }
+ 
+  private def doAuth(subject: String): Authentication[Credential] = {
+    Option(Authorisation.newAuthorizationCodeFlow().loadCredential(subject))
+      .map(Right(_)).getOrElse(Left(AuthenticationFailedRejection(AuthenticationFailedRejection.CredentialsRejected, Nil)))
+  }
+ 
+}
+</pre></code>
+<p>In human-speak, we look up the <code>Subject</code> header, returning a rejection if it is missing. If we have a value, we attempt to find the matching <code>Credential</code>, again rejecting the request if the <code>Credential</code> for the given subject could not be found.</p>
+</div>
+<div>
+<h2>Wiring up</h2>
+<p>To wire everything up, we need to consider the order of the routes, leaving the <code>StaticService.route</code> last.</p>
+<code><pre>
+class Main(route: Route) extends HttpServiceActor {
+  def receive: Receive = runRoute(route)
+}
+ 
+object Main extends App with RouteConcatenation {
+  implicit val system = ActorSystem("Mirror")
+  import system.dispatcher
+  val mirror = system.actorOf(Props[MirrorClientActor])
+  val service = system.actorOf(Props(
+    new Main(AuthorisationService.route ~ TimelineService.route(mirror) ~ StaticService.route)))
+  val io = IO(Http)
+  io ! Http.Bind(service, interface = "0.0.0.0", port = 8080)
+ 
+  StdIn.readLine()
+  system.shutdown()
+}
+</pre></code>
+<p>This leaves us with just the <code>MirrorClientActor</code> to implement! This actor will use the Mirror API and actually post the timeline items.</p>
+</div>
+
+<div>
+<h2>MirrorClientActor</h2>
+<p>As we are using the Google Client APIs, the implementation of the actor is going to be rather trivial. (A non-blocking implementation will be slightly more involved, but this is good enough to as a proof of concept!) And so, on to the code.</p>
+<code><pre>
+class MirrorClientActor extends Actor {
+  import org.eigengo.mirror.ClientComponents._
+ 
+  def mirror(credential: Credential) = new Mirror.Builder(transport, jsonFactory, credential)
+      .setApplicationName("Activator Mirror")
+      .build()
+ 
+  def receive: Receive = {
+    case (c: Credential, t: TimelineItem) =>
+      sender ! mirror(c).timeline().insert(t).execute().getId
+  }
+}
+</pre></code>
+<p>This is really all there is to it. When we receive the tuple containing the <code>Credential</code> and the <code>TimelineItem</code>, we simply call the Mirror API and insert the given <code>TimelineItem</code>!</p>
+</div>
+
+<div>
+<h2>The AngularJS app</h2>
+<p>To keep things simple, the Angular JS application’s UI and code also remains as short as possible.</p>
+<code><pre>
+&lt;!DOCTYPE html&gt;
+&lt;html ng-app="mirror"&gt;
+&lt;head&gt;
+    &lt;script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.3.0-beta.14/angular.min.js"&gt;&lt;/script&gt;
+    &lt;script type="text/javascript" src="js/mirror.js"&gt;&lt;/script&gt;
+    &lt;title&gt;Glassware&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div ng-controller="MirrorController"&gt;
+    &lt;fieldset&gt;
+        &lt;label&gt;Timeline&lt;/label&gt;
+ 
+        &lt;input ng-model="timelineMessage"/&gt;
+        &lt;button ng-click="insertTimeline()"&gt;Insert Timeline&lt;/button&gt;
+    &lt;/fieldset&gt;
+&lt;/div&gt;
+ 
+&lt;/body&gt;
+&lt;/html&gt;
+</pre></code>
+<p>There is no fancy UI, all that the users can do is to type the message and submit it by clicking the button. The JavaScript side is also simple, though it needs to deal with the redirects and setting the HTTP header in the POST to the <code>/timeline</code> endpoint.</p>
+<code><pre>
+angular.module('mirror', []);
+ 
+angular.module('mirror').controller('MirrorController',
+    function($scope, $location, $http, $window) {
+        $scope.subject = $location.search().subject;
+ 
+        $scope.insertTimeline = function() {
+            console.log("ere);");
+            $http({method: 'POST', url: '/timeline', headers: { 'Subject': $scope.subject }, data: $scope.timelineMessage}).
+                success(function(data, status, headers, config) {
+                    // this callback will be called asynchronously
+                    // when the response is available
+                    alert('it worked!');
+                }).
+                error(function(data, status, headers, config) {
+                    $window.location.href = '/oauth2callback';
+                });
+        };
+    });
+</pre></code>
+</div>
+
+<div>
+<h2>Running the beast</h2>
+<p>Before you type in sbt run to run the Spray server, remember the code in <code>Authorisation</code>:</p>
+<code><pre>
+object Authorisation {
+  ...
+ 
+  private final val (clientId, clientSecret) = {
+    val config = ConfigFactory.parseFile(new File(System.getProperty("user.home"), ".google/mirror"))
+    (config.getString("clientId"), config.getString("clientSecret"))
+  }
+ 
+  ...
+}
+</pre></code>
+<p>You need to create the HOCON file in <code>~/.google/mirror</code>, and it must contain the client id and client secret that you generated in the <a href="https://console.developers.google.com/" target="_blank">Google Developer Console</a>.</p>
+<p><a href="https://eigengo.files.wordpress.com/2014/07/console.png"><img src="/console.png" title="Developer console" /></a></p>
+<p>Now everything is truly ready to go. Run the application using, and navigate to <a href="http://localhost:8080/index.html" target="_blank">http://localhost:8080/index.html</a>. When you first try to submit a timeline item, the application will redirect you to the Google login; on success, it will take you back to the home page, where you will be able to submit the item.</p>
+</div>
+
+</body>
+</html>
