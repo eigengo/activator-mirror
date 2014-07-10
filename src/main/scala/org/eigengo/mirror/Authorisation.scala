@@ -16,8 +16,14 @@ object Authorisation {
     "https://www.googleapis.com/auth/glass.location " +
     "https://www.googleapis.com/auth/userinfo.profile"
   private final val (clientId, clientSecret) = {
-    val config = ConfigFactory.parseFile(new File(System.getProperty("user.home"), ".google/mirror"))
-    (config.getString("clientId"), config.getString("clientSecret"))
+  	try {
+      val config = ConfigFactory.parseFile(new File(System.getProperty("user.home"), ".google/mirror"))
+      (config.getString("clientId"), config.getString("clientSecret"))
+    } catch {
+      case t: Throwable => 
+      	println("Could not load configuration. Be sure to create the file ~/.google/mirror.")
+      	???
+    }
   }
   private final val dataStoreFactory = new MemoryDataStoreFactory()
 

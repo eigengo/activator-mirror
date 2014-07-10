@@ -18,7 +18,4 @@ object Main extends App with RouteConcatenation {
   val service = system.actorOf(Props(new Main(AuthorisationService.route ~ TimelineService.route(mirror) ~ StaticService.route)))
   val io = IO(Http)
   io ! Http.Bind(service, interface = "0.0.0.0", port = 8080)
-
-  StdIn.readLine()
-  system.shutdown()
 }

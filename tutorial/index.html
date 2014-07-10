@@ -10,9 +10,9 @@
 <div>
 <h2>The goal</h2>
 <p>To demonstrate the Mirror APIs, we will build an application that allows users to insert messages to the Glass’s timeline. The application will prompt you to log in to your Google account if it does not have a valid OAuth2 authentication; once you log in and the application receives the OAuth2 credential, you can then type your message, click Insert Timeline, and the message will appear on your Glass.</p>
-<p><img src="/oauth2.png" title="OAuth2 login"/></p>
-<p><img src="/accept.png" title="Accept required privileges"/></p>
-<p><img src="/insert.png" title="Send message to Glass"/></p>
+<p><img src="tutorial/oauth2.png" title="OAuth2 login"/></p>
+<p><img src="tutorial/accept.png" title="Accept required privileges"/></p>
+<p><img src="tutorial/insert.png" title="Send message to Glass"/></p>
 </div>
 <div>
 <h2>The main components</h2>
@@ -26,7 +26,7 @@
 </div>
 <div>
 <h2>The REST server</h2>
-<p>The REST server follows the usual pattern of spray-can applications. It starts the HTTP server and binds an actor that handles the incoming HTTP requests. Naturally, instead of dealing with the raw HTTP requests, we use spray-routing to express the endpoint behaviour in a convenient DSL.</p>
+<p>The REST server follows the usual pattern of spray-can applications. It starts the HTTP server and binds an actor that handles the incoming HTTP requests. Naturally, instead of dealing with the raw HTTP requests, we use spray-routing to express the endpoint behaviour in a convenient DSL. In <a href='#code/src/main/scala/org/eigengo/mirror/Main.scala' class='shorcut'>Main</a>, we have:</p>
 <code><pre>
 class Main(route: Route) extends HttpServiceActor {
   def receive: Receive = runRoute(route)
@@ -46,7 +46,7 @@ object Main extends App with RouteConcatenation {
 </div>
 <div>
 <h2>StaticService</h2>
-<p>The <code>StaticService</code>, as one expects, is the easiest to implement. It handles the GET requests by serving the content of a resource (a file on the classpath).</p>
+<p>The <code><a href='#code/src/main/scala/org/eigengo/mirror/StaticService.scala' class='shorcut'>StaticService</a></code>, as one expects, is the easiest to implement. It handles the GET requests by serving the content of a resource (a file on the classpath).</p>
 <code><pre>
 object StaticService extends Directives {
  
@@ -59,7 +59,7 @@ object StaticService extends Directives {
 </div>
 <div>
 <h2>AuthorisationService</h2>
-<p>The <code>/oauth2callback</code> endpoint that this service exposes deals with getting and remembering the OAuth2 authenticaton that we will need for the <code>/timeline</code> endpoint. On a GET request to <code>/oauth2callback</code>, we check if we have the <code>code</code> request parameter. If so, we have received the OAuth2 response, and we’re ready to create the credential. If not, we need to compute a redirect URL, which will take the user to the Google login page. In code, all this looks a lot less scary.</p>
+<p>The <code>/oauth2callback</code> endpoint that this service exposes deals with getting and remembering the OAuth2 authenticaton that we will need for the <code>/timeline</code> endpoint. On a GET request to <code>/oauth2callback</code>, we check if we have the <code>code</code> request parameter. If so, we have received the OAuth2 response, and we’re ready to create the credential. If not, we need to compute a redirect URL, which will take the user to the Google login page. In <a href='#code/src/main/scala/org/eigengo/mirror/AuthorisationService.scala' class='shorcut'>AuthorisationService</a>, all this looks a lot less scary.</p>
 <code><pre>
 object AuthorisationService extends Directives {
  
@@ -89,7 +89,7 @@ object AuthorisationService extends Directives {
  
 }
 </pre></code>
-<p>The only thing that this listing is not showing is the <code>Authorisation</code> module, which handles the internals of the OAuth2 mechanism. To make our code easier, we are using the Google client APIs.</p>
+<p>The only thing that this listing is not showing is the <code><a href='#code/src/main/scala/org/eigengo/mirror/Authorisation.scala' class='shorcut'>Authorisation</a></code> module, which handles the internals of the OAuth2 mechanism. To make our code easier, we are using the Google client APIs.</p>
 <code><pre>
 object ClientComponents {
   val transport = new NetHttpTransport()
@@ -122,7 +122,7 @@ object Authorisation {
 </div>
 <div>
 <h2>TimelineService</h2>
-<p>To complete the picture, the <code>TimelineService</code> exposes the <code>/timeline</code> endpoint, which receives the text of the message to be sent out as the request body and the OAuth2 subject as the header parameter. It delegates the actual sending of the timeline item to the <code>MirrorClientActor</code>.</p>
+<p>To complete the picture, the <code><a href='#code/src/main/scala/org/eigengo/mirror/TimelineService.scala' class='shorcut'>TimelineService</a></code> exposes the <code>/timeline</code> endpoint, which receives the text of the message to be sent out as the request body and the OAuth2 subject as the header parameter. It delegates the actual sending of the timeline item to the <code>MirrorClientActor</code>.</p>
 <code><pre>
 object TimelineService extends Directives {
   import Authentication._
@@ -147,7 +147,7 @@ object TimelineService extends Directives {
  
 }
 </pre></code>
-<p>Apart from the <code>authenticate(validCredential)</code> call, this is again fairly standard Spray code! It turns out that the implementaton of <code>validCredential</code> is not too onerous, eihter:</p>
+<p>Apart from the <code>authenticate(validCredential)</code> call, this is again fairly standard Spray code! It turns out that the implementaton of <code>validCredential</code> is not too onerous, eihter, as the code in <code><a href='#code/src/main/scala/org/eigengo/mirror/Authentication.scala' class='shorcut'>Authentication</a></code> shows.</p>
 <code><pre>
 object Authentication {
   private val headerName = "Subject"
@@ -169,7 +169,7 @@ object Authentication {
 </div>
 <div>
 <h2>Wiring up</h2>
-<p>To wire everything up, we need to consider the order of the routes, leaving the <code>StaticService.route</code> last.</p>
+<p>To wire everything up, we need to consider the order of the routes, leaving the <code>StaticService.route</code> last. The final version of <a href='#code/src/main/scala/org/eigengo/mirror/Main.scala' class='shorcut'>Main</a> is now simply:</p>
 <code><pre>
 class Main(route: Route) extends HttpServiceActor {
   def receive: Receive = runRoute(route)
@@ -188,7 +188,7 @@ object Main extends App with RouteConcatenation {
   system.shutdown()
 }
 </pre></code>
-<p>This leaves us with just the <code>MirrorClientActor</code> to implement! This actor will use the Mirror API and actually post the timeline items.</p>
+<p>This leaves us with just the <code><a href='#code/src/main/scala/org/eigengo/mirror/MirrorClientActor.scala' class='shorcut'>MirrorClientActor</a></code> to implement! This actor will use the Mirror API and actually post the timeline items.</p>
 </div>
 
 <div>
@@ -213,7 +213,7 @@ class MirrorClientActor extends Actor {
 
 <div>
 <h2>The AngularJS app</h2>
-<p>To keep things simple, the Angular JS application’s UI and code also remains as short as possible.</p>
+<p>To keep things simple, the Angular JS application’s UI and code also remains as short as possible. The only HTML file we have is <a href='#code/src/main/angular/index.html' class='shorcut'>index.html</a>, which pulls in the AngularJS framework and our AngularJS application.</p>
 <code><pre>
 &lt;!DOCTYPE html&gt;
 &lt;html ng-app="mirror"&gt;
@@ -235,7 +235,7 @@ class MirrorClientActor extends Actor {
 &lt;/body&gt;
 &lt;/html&gt;
 </pre></code>
-<p>There is no fancy UI, all that the users can do is to type the message and submit it by clicking the button. The JavaScript side is also simple, though it needs to deal with the redirects and setting the HTTP header in the POST to the <code>/timeline</code> endpoint.</p>
+<p>There is no fancy UI, all that the users can do is to type the message and submit it by clicking the button. The JavaScript side is also simple, though it needs to deal with the redirects and setting the HTTP header in the POST to the <code>/timeline</code> endpoint. The <a href='#code/src/main/angular/js/mirror.js' class='shorcut'>mirror.js</a> is the last component.</p>
 <code><pre>
 angular.module('mirror', []);
  
@@ -261,7 +261,7 @@ angular.module('mirror').controller('MirrorController',
 
 <div>
 <h2>Running the beast</h2>
-<p>Before you type in sbt run to run the Spray server, remember the code in <code>Authorisation</code>:</p>
+<p>Before you run the application, remember the code in <code>Authorisation</code>:</p>
 <code><pre>
 object Authorisation {
   ...
@@ -274,9 +274,10 @@ object Authorisation {
   ...
 }
 </pre></code>
-<p>You need to create the HOCON file in <code>~/.google/mirror</code>, and it must contain the client id and client secret that you generated in the <a href="https://console.developers.google.com/" target="_blank">Google Developer Console</a>.</p>
-<p><a href="https://eigengo.files.wordpress.com/2014/07/console.png"><img src="/console.png" title="Developer console" /></a></p>
-<p>Now everything is truly ready to go. Run the application using, and navigate to <a href="http://localhost:8080/index.html" target="_blank">http://localhost:8080/index.html</a>. When you first try to submit a timeline item, the application will redirect you to the Google login; on success, it will take you back to the home page, where you will be able to submit the item.</p>
+<p>You need to create the HOCON file in <code>~/.google/mirror</code>, and it must contain the client id and client secret that you generated in the <a href="https://console.developers.google.com/" target="_blank">Google Developer Console</a>. When you do create the OAuth Client ID, be sure to create it for a <em>Web application</em>, specifying <code>http://localhost</code> for authorised JavaScript origins, and <code>http://localhost:8080/oauth2callback</code> for the authorised redirect URI.</p>
+<p><a href="https://eigengo.files.wordpress.com/2014/07/console.png"><img src="tutorial/console.png" title="Developer console" /></a></p>
+<p><img src="tutorial/clientid.png" title="Client ID settings"/></p>
+<p>Now everything is truly ready to go. Run the application, and navigate to <a href="http://localhost:8080/index.html" target="_blank">http://localhost:8080/index.html</a>. When you first try to submit a timeline item, the application will redirect you to the Google login; on success, it will take you back to the home page, where you will be able to submit the item.</p>
 </div>
 
 </body>
